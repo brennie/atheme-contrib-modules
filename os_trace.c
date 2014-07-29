@@ -767,7 +767,7 @@ trace_action_constructor_t trace_count = { trace_count_prepare, trace_count_exec
  *
  * This allows third-party module writers to extend the trace API.
  * Just copy the prototypes out of trace.c, and add the trace_cmdtree
- * symbol to your module with MODULE_USE_SYMBOL().
+ * symbol to your module with MODULE_TRY_REQUEST_SYMBOL().
  *
  * Then add your criteria to the tree with mowgli_patricia_add().
  */
