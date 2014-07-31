@@ -177,6 +177,25 @@ bool pattern_match(alert_pattern_t *p, const char *s)
 	}
 }
 
+/*
+ * Add-on interface.
+ *
+ * This allows third-party module writers to extend the alert API. Just copy
+ * the prototypes out of os_alert.c, and add the alert_cmdtree symbol to your
+ * module with MODULE_TRY_REQUEST_SYMBOL().
+ *
+ * Then add your criteria to the tree with mowgli_patricia_add().
+ */
+mowgli_patricia_t *alert_cmdtree = NULL;
+mowgli_patricia_t *alert_acttree = NULL;
+
+/* The list of active alerts. */
+mowgli_list_t all_alerts = { NULL, NULL, 0 };
+
+/* A map of users (entity names) to mowgli_list_t of alerts with pointers into
+ * the all_alerts list. */
+mowgli_patricia_t *alerts = NULL;
+
 void _modinit(module_t *module)
 {
 	operserv = service_find("operserv");
