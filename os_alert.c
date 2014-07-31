@@ -106,6 +106,25 @@ void pattern_destroy(alert_pattern_t *p)
 	free(p);
 }
 
+/* Do a pattern match with the given pattern against the string s. */
+bool pattern_match(alert_pattern_t *p, const char *s)
+{
+	return_val_if_fail(p != NULL, false);
+	return_val_if_fail(s != NULL, false);
+
+	switch (p->type)
+	{
+		case PAT_GLOB:
+			return match(p->pattern.glob, s);
+
+		case PAT_REGEX:
+			return regex_match(p->pattern.regex.regex, (char *)s);
+
+		default:
+			return false;
+	}
+}
+
 /* The type of event that a criteria can be triggered on. */
 typedef enum {
 	EVT_CONNECT  = 0x01,
@@ -157,25 +176,6 @@ struct alert_ {
 	alert_action_t *action;   /* The alert action. */
 	mowgli_list_t criteria;   /* The list of criteria. */
 };
-
-/* Do a pattern match with the given pattern against the string s. */
-bool pattern_match(alert_pattern_t *p, const char *s)
-{
-	return_val_if_fail(p != NULL, false);
-	return_val_if_fail(s != NULL, false);
-
-	switch (p->type)
-	{
-		case PAT_GLOB:
-			return match(p->pattern.glob, s);
-
-		case PAT_REGEX:
-			return regex_match(p->pattern.regex.regex, (char *)s);
-
-		default:
-			return false;
-	}
-}
 
 /*
  * Add-on interface.
