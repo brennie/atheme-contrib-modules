@@ -24,7 +24,7 @@ static void os_cmd_alert_list(sourceinfo_t *si, int parc, char *parv[]);
 command_t os_alert = {
 	"ALERT",
 	N_("Checks if users joining the network match criteria and performs actions on them."),
-	PRIV_USER_AUSPEX, 2, os_cmd_alert, { .path = "contrib/os_alert"}
+	PRIV_USER_AUSPEX, 3, os_cmd_alert, { .path = "contrib/os_alert"}
 };
 
 command_t os_alert_add = {
@@ -83,7 +83,7 @@ alert_pattern_t* pattern_extract(char **args, bool allow_quotes)
 
 		p = smalloc(sizeof(alert_pattern_t));
 		p->type = PAT_REGEX;
-		p->pattern.regex.pattern = pattern;
+		p->pattern.regex.pattern = sstrdup(pattern);
 		p->pattern.regex.flags = flags;
 		p->pattern.regex.regex = regex_create(pattern, flags);
 	}
@@ -105,7 +105,7 @@ alert_pattern_t* pattern_extract(char **args, bool allow_quotes)
 
 		p = smalloc(sizeof(alert_pattern_t));
 		p->type = PAT_GLOB;
-		p->pattern.glob = pattern;
+		p->pattern.glob = sstrdup(pattern);
 	}
 
 	return p;
@@ -176,6 +176,11 @@ struct alert_criteria_ {
 	alert_criteria_constructor_t *cons;
 };
 
+typedef struct {
+	alert_criteria_t base;
+	alert_pattern_t *pattern;
+} alert_nick_criteria_t;
+
 alert_criteria_t *alert_nick_criteria_prepare(char **args)
 {
 	alert_nick_criteria_t *criteria;
@@ -188,7 +193,7 @@ alert_criteria_t *alert_nick_criteria_prepare(char **args)
 	return_val_if_fail(pattern != NULL, NULL);
 
 	criteria = smalloc(sizeof(alert_nick_criteria_t));
-	c->pattern = pattern;
+	criteria->pattern = pattern;
 }
 
 bool alert_nick_criteria_exec(user_t *u, alert_criteria_t *c)
@@ -203,7 +208,7 @@ bool alert_nick_criteria_exec(user_t *u, alert_criteria_t *c)
 
 void alert_nick_criteria_cleanup(alert_criteria_t *c)
 {
-	alert_criteria_t *criteria = (alert_nick_criteria_t *)c;
+	alert_nick_criteria_t *criteria = (alert_nick_criteria_t *)c;
 
 	return_if_fail(c != NULL);
 
@@ -322,7 +327,7 @@ void _modinit(module_t *module)
 /* Destroy an alert and remove it from all lists */
 static void alert_destroy(alert_t *alert)
 {
-	mowgli_list_t *owned_list;
+	mowgli_list_t *owned_list = NULL;
 
 	return_if_fail(alert != NULL);
 
@@ -401,11 +406,6 @@ static void os_cmd_alert(sourceinfo_t *si, int parc, char *parv[])
 		return;
 	}
 
-	for (int i = 0; i < parc; i++)
-	{
-		slog(LG_DEBUG, "%d: %s", i, parv[i]);
-	}
-
 	c = command_find(os_alert_cmds, cmd);
 	if (c == NULL)
 	{
@@ -424,7 +424,6 @@ static void os_cmd_alert_add(sourceinfo_t *si, int parc, char *parv[])
 	alert_t *alert;
 
 	mowgli_list_t criteria_list = { NULL, NULL, 0 };
-	mowgli_node_t *alert_node = NULL;
 	mowgli_list_t *owned_alerts_list = NULL;
 
 	char *args = parv[1];
@@ -468,6 +467,23 @@ static void os_cmd_alert_add(sourceinfo_t *si, int parc, char *parv[])
 			break;
 		}
 
+		cons = mowgli_patricia_retrieve(alert_cmdtree, cmd);
+		if (cons == NULL)
+		{
+			command_fail(si, fault_nosuch_target, _("Invalid criteria specified."));
+			failed = true;
+			break;
+		}
+
+		args = strtok(NULL, "");
+		if (args == NULL)
+		{
+			command_fail(si, fault_nosuch_target, _("Invalid criteria specified."));
+			failed = true;
+			break;
+
+		}
+
 		criteria = cons->prepare(&args);
 		slog(LG_DEBUG, "operserv/alert: adding criteria %p(%s) to list [remain: %s]", criteria, cmd, args);
 		if (criteria == NULL)
@@ -507,10 +523,11 @@ static void os_cmd_alert_add(sourceinfo_t *si, int parc, char *parv[])
 	alert->criteria = criteria_list;
 	alert->event_mask = event_mask;
 
-	alert_node = mowgli_node_create();
+	alert->node = mowgli_node_create();
+	alert->owned_node = mowgli_node_create();
 
 	/* Add the alert to the list of all alerts. */
-	mowgli_node_add(alert, alert_node, &alerts);
+	mowgli_node_add(alert, alert->node, &alerts);
 
 	/* If the requesting user doesn't have any alerts, we create a new list for
 	 * him/her.
@@ -521,9 +538,12 @@ static void os_cmd_alert_add(sourceinfo_t *si, int parc, char *parv[])
 		owned_alerts_list = mowgli_list_create();
 		mowgli_patricia_add(owned_alerts, alert->owner, owned_alerts_list);
 	}
-
 	/* Add the alert to the owner's list of alerts. */
-	mowgli_node_add(alert_node, mowgli_node_create(), owned_alerts_list);
+	mowgli_node_add(alert->node, alert->owned_node, owned_alerts_list);
+
+	slog(LG_DEBUG, "alert->owned_node = %p", alert->owned_node);
+
+	command_success_nodata(si, _("Added alert \x02%d\x02."), owned_alerts_list->count);
 }
 
 static void os_cmd_alert_del(sourceinfo_t *si, int parc, char *parv[])
@@ -555,8 +575,13 @@ static void os_cmd_alert_del(sourceinfo_t *si, int parc, char *parv[])
 
 	else
 	{
-		alert_t *alert = mowgli_node_nth_data(owned_list, n);
+		alert_t *alert = ((mowgli_node_t *)mowgli_node_nth_data(owned_list, n))->data;
+
+		return_if_fail(alert != NULL);
+
 		alert_destroy(alert);
+
+		command_success_nodata(si, _("Deleted alert."));
 	}
 }
 
@@ -570,11 +595,13 @@ static void os_cmd_alert_list(sourceinfo_t *si, int parc, char *parv[])
 	{
 		mowgli_node_t *node = NULL;
 		int i = 0;
+		command_success_nodata(si, _("Alerts:"));
 		MOWGLI_LIST_FOREACH(node, owned_list->head)
 		{
-			alert_t *alert = node->data;
+			alert_t *alert = ((mowgli_node_t *)node->data)->data;
 			command_success_nodata(si, "Alert: %d %s", i, alert->action->cons->name);
 			i++;
 		}
+		command_success_nodata(si, _("End of alerts."));
 	}
 }
