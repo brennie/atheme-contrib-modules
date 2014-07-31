@@ -176,7 +176,46 @@ struct alert_criteria_ {
 	alert_criteria_constructor_t *cons;
 };
 
+alert_criteria_t *alert_nick_criteria_prepare(char **args)
+{
+	alert_nick_criteria_t *criteria;
+	alert_pattern_t *pattern;
 
+	return_val_if_fail(args != NULL, NULL);
+	return_val_if_fail(*args != NULL, NULL);
+
+	pattern = pattern_extract(args, false);
+	return_val_if_fail(pattern != NULL, NULL);
+
+	criteria = smalloc(sizeof(alert_nick_criteria_t));
+	c->pattern = pattern;
+}
+
+bool alert_nick_criteria_exec(user_t *u, alert_criteria_t *c)
+{
+	alert_nick_criteria_t *criteria = (alert_nick_criteria_t *)c;
+
+	return_val_if_fail(u != NULL, NULL);
+	return_val_if_fail(c != NULL, NULL);
+
+	return pattern_match(criteria->pattern, u->nick);
+}
+
+void alert_nick_criteria_cleanup(alert_criteria_t *c)
+{
+	alert_criteria_t *criteria = (alert_nick_criteria_t *)c;
+
+	return_if_fail(c != NULL);
+
+	pattern_destroy(criteria->pattern);
+	free(criteria);
+}
+
+alert_criteria_constructor_t alert_nick_criteria = {
+	"NICK",
+	alert_nick_criteria_prepare, alert_nick_criteria_exec, alert_nick_criteria_cleanup,
+	EVT_CONNECT | EVT_NICK
+};
 
 /* A constructor for an alert action. */
 typedef struct {
@@ -266,6 +305,12 @@ void _modinit(module_t *module)
 	operserv = service_find("operserv");
 	service_bind_command(operserv, &os_alert);
 
+	alert_cmdtree = mowgli_patricia_create(strcasecanon);
+	mowgli_patricia_add(alert_cmdtree, alert_nick_criteria.name, &alert_nick_criteria);
+
+	alert_acttree = mowgli_patricia_create(strcasecanon);
+	mowgli_patricia_add(alert_acttree, alert_notice_action.name, &alert_notice_action);
+
 	owned_alerts = mowgli_patricia_create(strcasecanon);
 
 	os_alert_cmds = mowgli_patricia_create(strcasecanon);
@@ -320,6 +365,12 @@ void owned_alerts_cleanup(const char *key, void *data, void *unused)
 void _moddeinit(module_unload_intent_t intent)
 {
 	service_unbind_command(operserv, &os_alert);
+
+	mowgli_patricia_delete(alert_cmdtree, alert_nick_criteria.name);
+	mowgli_patricia_destroy(alert_cmdtree, NULL, NULL);
+
+	mowgli_patricia_delete(alert_acttree, alert_notice_action.name);
+	mowgli_patricia_destroy(alert_acttree, NULL, NULL);
 
 	command_delete(&os_alert_add, os_alert_cmds);
 	command_delete(&os_alert_del, os_alert_cmds);
