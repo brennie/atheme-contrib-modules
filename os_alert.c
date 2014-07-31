@@ -568,12 +568,12 @@ static void os_cmd_alert_del(sourceinfo_t *si, int parc, char *parv[])
 	if (owned_list == NULL)
 		command_fail(si, fault_nosuch_target, "You have no alerts.");
 
-	else if (n >= owned_list->count)
+	else if (n > owned_list->count)
 		command_fail(si, fault_nosuch_target, "No such alert.");
 
 	else
 	{
-		alert_t *alert = mowgli_node_nth_data(owned_list, n);
+		alert_t *alert = mowgli_node_nth_data(owned_list, n - 1);
 
 		return_if_fail(alert != NULL);
 
@@ -592,7 +592,7 @@ static void os_cmd_alert_list(sourceinfo_t *si, int parc, char *parv[])
 	else
 	{
 		mowgli_node_t *node = NULL;
-		int i = 0;
+		int i = 1;
 		command_success_nodata(si, _("Alerts:"));
 		MOWGLI_LIST_FOREACH(node, owned_list->head)
 		{
