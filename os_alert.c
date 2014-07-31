@@ -177,6 +177,41 @@ struct alert_ {
 	mowgli_list_t criteria;   /* The list of criteria. */
 };
 
+static alert_action_t *alert_notice_action_prepare(sourceinfo_t *si, char **args)
+{
+	return_val_if_fail(si != NULL, NULL);
+
+	return smalloc(sizeof(alert_action_t));
+}
+
+static void alert_notice_action_exec(user_t *u, alert_action_t *a)
+{
+	mowgli_node_t *node = NULL;
+	myentity_t *ent = NULL;
+
+	return_if_fail(u != NULL);
+	return_if_fail(a != NULL);
+
+	ent = myentity_find(a->alert->owner);
+	return_if_fail(ent != NULL);
+	return_if_fail(isuser(ent));
+
+	myuser_notice(operserv->nick, (myuser_t *)ent, "\2Alert:\2  %s!%s@%s %s {%s}", u->nick, u->user, u->host, u->gecos, u->server->name);
+
+}
+
+static void alert_notice_action_cleanup(alert_actioN_t *a)
+{
+	return_if_fail(a != NULL);
+
+	free(a);
+}
+
+alert_action_constructor_t alert_notice_action = {
+	"NOTICE", alert_notice_action_prepare,
+	alert_notice_action_exec, alert_notice_action_cleanup
+}
+
 /*
  * Add-on interface.
  *
