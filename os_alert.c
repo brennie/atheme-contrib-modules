@@ -539,9 +539,7 @@ static void os_cmd_alert_add(sourceinfo_t *si, int parc, char *parv[])
 		mowgli_patricia_add(owned_alerts, alert->owner, owned_alerts_list);
 	}
 	/* Add the alert to the owner's list of alerts. */
-	mowgli_node_add(alert->node, alert->owned_node, owned_alerts_list);
-
-	slog(LG_DEBUG, "alert->owned_node = %p", alert->owned_node);
+	mowgli_node_add(alert, alert->owned_node, owned_alerts_list);
 
 	command_success_nodata(si, _("Added alert \x02%d\x02."), owned_alerts_list->count);
 }
@@ -570,12 +568,12 @@ static void os_cmd_alert_del(sourceinfo_t *si, int parc, char *parv[])
 	if (owned_list == NULL)
 		command_fail(si, fault_nosuch_target, "You have no alerts.");
 
-	else if (n > owned_list->count)
+	else if (n >= owned_list->count)
 		command_fail(si, fault_nosuch_target, "No such alert.");
 
 	else
 	{
-		alert_t *alert = ((mowgli_node_t *)mowgli_node_nth_data(owned_list, n))->data;
+		alert_t *alert = mowgli_node_nth_data(owned_list, n);
 
 		return_if_fail(alert != NULL);
 
@@ -598,7 +596,7 @@ static void os_cmd_alert_list(sourceinfo_t *si, int parc, char *parv[])
 		command_success_nodata(si, _("Alerts:"));
 		MOWGLI_LIST_FOREACH(node, owned_list->head)
 		{
-			alert_t *alert = ((mowgli_node_t *)node->data)->data;
+			alert_t *alert = node->data;
 			command_success_nodata(si, "Alert: %d %s", i, alert->action->cons->name);
 			i++;
 		}
