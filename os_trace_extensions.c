@@ -101,7 +101,9 @@ static bool trace_account_exec(user_t *u, void *q)
 	mowgli_node_t *node = NULL;
 
 	return_val_if_fail(domain != NULL, false);
-	return_val_if_fail(u->myuser != NULL, false);
+
+	if (u->myuser == NULL)
+		return false;
 
 	MOWGLI_LIST_FOREACH(node, u->myuser->nicks.head)
 	{
