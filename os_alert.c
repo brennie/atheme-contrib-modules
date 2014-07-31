@@ -24,6 +24,107 @@ command_t os_alert = {
 	PRIV_USER_AUSPEX, 2, os_cmd_alert, { .path = "contrib/os_alert"}
 };
 
+/* A pattern, represented by a glob or a regex */
+typedef struct {
+	enum {
+		PAT_GLOB = 0, PAT_REGEX = 1
+	} type;
+
+	union {
+		char *glob;
+
+		struct {
+			char *pattern;
+			int flags;
+			atheme_regex_t *regex;
+		} regex;
+	} pattern;
+} alert_pattern_t;
+
+/* Extract a pattern, which is either a regular expression or a glob match,
+ * which can be multi-word glob if it is quoted.
+ */
+alert_pattern_t* pattern_extract(char **args, bool allow_quotes)
+{
+	alert_pattern_t *p = NULL;
+	char *pattern;
+
+	return_val_if_fail(args != NULL, NULL);
+	return_val_if_fail(*args != NULL, NULL);
+
+	while (**args == ' ')
+		(*args)++;
+
+	if (**args == '/')
+	{
+		int flags;
+		pattern = regex_extract(*args, args, &flags);
+
+		p = smalloc(sizeof(alert_pattern_t));
+		p->type = PAT_REGEX;
+		p->pattern.regex.pattern = pattern;
+		p->pattern.regex.flags = flags;
+		p->pattern.regex.regex = regex_create(pattern, flags);
+	}
+	else
+	{
+		if (!allow_quotes && **args == '"')
+			return NULL;
+
+		if (**args == '"')
+		{
+			pattern = strtok(*args + 1, "\"");
+
+			return_val_if_fail(pattern != NULL, NULL);
+		}
+		else
+			pattern = strtok(*args, " ");
+
+		*args = strtok(NULL, "");
+
+		p = smalloc(sizeof(alert_pattern_t));
+		p->type = PAT_GLOB;
+		p->pattern.glob = pattern;
+	}
+
+	return p;
+}
+
+/* Free the pattern. */
+void pattern_destroy(alert_pattern_t *p)
+{
+	return_if_fail(p != NULL);
+
+	if (p->type == PAT_REGEX)
+	{
+		free(p->pattern.regex.pattern);
+		regex_destroy(p->pattern.regex.regex);
+	}
+	else
+		free(p->pattern.glob);
+
+	free(p);
+}
+
+/* Do a pattern match with the given pattern against the string s. */
+bool pattern_match(alert_pattern_t *p, const char *s)
+{
+	return_val_if_fail(p != NULL, false);
+	return_val_if_fail(s != NULL, false);
+
+	switch (p->type)
+	{
+		case PAT_GLOB:
+			return match(p->pattern.glob, s);
+
+		case PAT_REGEX:
+			return regex_match(p->pattern.regex.regex, (char *)s);
+
+		default:
+			return false;
+	}
+}
+
 void _modinit(module_t *module)
 {
 	operserv = service_find("operserv");
