@@ -136,7 +136,7 @@ bool pattern_match(alert_pattern_t *p, const char *s)
 	switch (p->type)
 	{
 		case PAT_GLOB:
-			return match(p->pattern.glob, s);
+			return !match(p->pattern.glob, s);
 
 		case PAT_REGEX:
 			return regex_match(p->pattern.regex.regex, (char *)s);
