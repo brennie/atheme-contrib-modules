@@ -283,6 +283,17 @@ alert_action_constructor_t alert_notice_action = {
 	alert_notice_action_exec, alert_notice_action_cleanup
 };
 
+static void exec_events(user_t *u, alert_event_t event_mask);
+
+static void user_added(hook_user_nick_t *n)
+{
+	return_if_fail(n != NULL);
+	return_if_fail(n->u != NULL);
+
+	if (!is_internal_client(n->u))
+		exec_events(n->u, EVT_CONNECT);
+}
+
 /*
  * Add-on interface.
  *
@@ -322,6 +333,9 @@ void _modinit(module_t *module)
 	command_add(&os_alert_add, os_alert_cmds);
 	command_add(&os_alert_del, os_alert_cmds);
 	command_add(&os_alert_list, os_alert_cmds);
+
+	hook_add_event("user_add");
+	hook_add_user_add(user_added);
 }
 
 /* Destroy an alert and remove it from all lists */
@@ -601,5 +615,46 @@ static void os_cmd_alert_list(sourceinfo_t *si, int parc, char *parv[])
 			i++;
 		}
 		command_success_nodata(si, _("End of alerts."));
+	}
+}
+
+static void exec_events(user_t *u, alert_event_t event_mask)
+{
+	mowgli_node_t *alert_node = NULL;
+
+	return_if_fail(u != NULL);
+	return_if_fail(event_mask != 0);
+
+
+
+	MOWGLI_LIST_FOREACH(alert_node, alerts.head)
+	{
+		alert_t *alert = alert_node->data;
+
+		if (alert->event_mask & event_mask)
+		{
+
+			bool success = true;
+			mowgli_node_t *criteria_node = NULL;
+
+
+			MOWGLI_LIST_FOREACH(criteria_node, alert->criteria.head)
+			{
+				alert_criteria_t *criteria = criteria_node->data;
+				alert_criteria_constructor_t *cons = criteria->cons;
+
+				if (!cons->exec(u, criteria))
+				{
+					success = false;
+					break;
+				}
+			}
+
+			if (success)
+			{
+				alert_action_constructor_t *cons = alert->action->cons;
+				cons->exec(u, alert->action);
+			}
+		}
 	}
 }
