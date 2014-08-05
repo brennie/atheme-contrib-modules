@@ -14,6 +14,20 @@ DECLARE_MODULE_V1
 	"Barret Rennie <barret@brennie.ca>"
 );
 
+/* Append to s using the pattern and variable args. */
+static void snappendf(char *s, size_t size, const char *pattern, ...)
+{
+	va_list args;
+	size_t len;
+
+	return_if_fail(s != NULL);
+
+	va_start(args, pattern);
+	len = strlen(s);
+	vsnprintf(s + len, size - len, pattern, args);
+	va_end(args);
+}
+
 static service_t *operserv;
 
 static void os_cmd_alert(sourceinfo_t *si, int parc, char *parv[]);
@@ -166,7 +180,9 @@ typedef struct {
 
 	alert_criteria_t *(*prepare)(char **args);
 	bool (*exec)(user_t *u, alert_criteria_t *c);
-	void (*cleanup)( alert_criteria_t *c);
+	void (*cleanup)(alert_criteria_t *c);
+
+	void (*display)(char *s, size_t size, alert_criteria_t *c);
 
 	alert_event_t event_mask;
 } alert_criteria_constructor_t;
@@ -216,9 +232,23 @@ void alert_nick_criteria_cleanup(alert_criteria_t *c)
 	free(criteria);
 }
 
+void alert_nick_criteria_display(char *s, size_t size, alert_criteria_t *c)
+{
+	alert_nick_criteria_t *criteria = (alert_nick_criteria_t *)c;
+
+	return_if_fail(c != NULL);
+	return_if_fail(c != NULL);
+
+	if (criteria->pattern->type == PAT_GLOB)
+		snappendf(s, size, " NICK %s", criteria->pattern->pattern.glob);
+	else
+		snappendf(s, size, " NICK %s", criteria->pattern->pattern.regex.pattern);
+}
+
 alert_criteria_constructor_t alert_nick_criteria = {
 	"NICK",
 	alert_nick_criteria_prepare, alert_nick_criteria_exec, alert_nick_criteria_cleanup,
+	alert_nick_criteria_display,
 	EVT_CONNECT | EVT_NICK
 };
 
@@ -268,7 +298,6 @@ static void alert_notice_action_exec(user_t *u, alert_action_t *a)
 	return_if_fail(isuser(ent));
 
 	myuser_notice(operserv->nick, (myuser_t *)ent, "\2Alert:\2  %s!%s@%s %s {%s}", u->nick, u->user, u->host, u->gecos, u->server->name);
-
 }
 
 static void alert_notice_action_cleanup(alert_action_t *a)
@@ -623,7 +652,18 @@ static void os_cmd_alert_list(sourceinfo_t *si, int parc, char *parv[])
 		MOWGLI_LIST_FOREACH(node, owned_list->head)
 		{
 			alert_t *alert = node->data;
-			command_success_nodata(si, "Alert: %d %s", i, alert->action->cons->name);
+			mowgli_node_t *criteria_node = NULL;
+			char buf[512] = {0};
+
+			MOWGLI_LIST_FOREACH(criteria_node, alert->criteria.head)
+			{
+				alert_criteria_t *criteria = criteria_node->data;
+				alert_criteria_constructor_t *cons = criteria->cons;
+
+				cons->display(buf, sizeof(buf), criteria);
+			}
+
+			command_success_nodata(si, "Alert: %d %s%s", i, alert->action->cons->name, buf);
 			i++;
 		}
 		command_success_nodata(si, _("End of alerts."));
