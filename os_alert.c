@@ -7,6 +7,8 @@
 
 #include "atheme-compat.h"
 
+#include "os_alert.h"
+
 DECLARE_MODULE_V1
 (
 	"contrib/os_alert", false, _modinit, _moddeinit,
@@ -59,27 +61,10 @@ command_t os_alert_list = {
 	AC_NONE, 0, os_cmd_alert_list, { .path = "" }
 };
 
-/* A pattern, represented by a glob or a regex */
-typedef struct {
-	enum {
-		PAT_GLOB = 0, PAT_REGEX = 1
-	} type;
-
-	union {
-		char *glob;
-
-		struct {
-			char *pattern;
-			int flags;
-			atheme_regex_t *regex;
-		} regex;
-	} pattern;
-} alert_pattern_t;
-
 /* Extract a pattern, which is either a regular expression or a glob match,
  * which can be multi-word glob if it is quoted.
  */
-alert_pattern_t* pattern_extract(char **args, bool allow_quotes)
+static alert_pattern_t* pattern_extract(char **args, bool allow_quotes)
 {
 	alert_pattern_t *p = NULL;
 	char *pattern;
@@ -94,7 +79,7 @@ alert_pattern_t* pattern_extract(char **args, bool allow_quotes)
 	{
 		int flags;
 		pattern = regex_extract(*args, args, &flags);
-
+		return_val_if_fail(pattern != NULL, NULL);
 		p = smalloc(sizeof(alert_pattern_t));
 		p->type = PAT_REGEX;
 		p->pattern.regex.pattern = sstrdup(pattern);
@@ -126,7 +111,7 @@ alert_pattern_t* pattern_extract(char **args, bool allow_quotes)
 }
 
 /* Free the pattern. */
-void pattern_destroy(alert_pattern_t *p)
+static void pattern_destroy(alert_pattern_t *p)
 {
 	return_if_fail(p != NULL);
 
@@ -141,8 +126,25 @@ void pattern_destroy(alert_pattern_t *p)
 	free(p);
 }
 
+static void pattern_display(char *s, size_t len, alert_pattern_t *p)
+{
+	return_if_fail(s != NULL);
+	return_if_fail(p != NULL);
+
+	if (p->type == PAT_REGEX)
+	{
+		snappendf(s, len, " /%s/", p->pattern.regex.pattern);
+		if (p->pattern.regex.flags & AREGEX_ICASE)
+			snappendf(s, len, "i");
+		if (p->pattern.regex.flags & AREGEX_PCRE)
+			snappendf(s, len, "p");
+	}
+	else
+		snappendf(s, len, " %s", p->pattern.glob);
+}
+
 /* Do a pattern match with the given pattern against the string s. */
-bool pattern_match(alert_pattern_t *p, const char *s)
+static bool pattern_match(alert_pattern_t *p, const char *s)
 {
 	return_val_if_fail(p != NULL, false);
 	return_val_if_fail(s != NULL, false);
@@ -160,44 +162,28 @@ bool pattern_match(alert_pattern_t *p, const char *s)
 	}
 }
 
-/* The type of event that a criteria can be triggered on. */
-typedef enum {
-	EVT_CONNECT  = 0x01,
-	EVT_IDENTIFY = 0x02,
-	EVT_REGISTER = 0x04,
-	EVT_JOIN     = 0x08,
-	EVT_PART     = 0x10,
-	EVT_NICK     = 0x20
-} alert_event_t;
+/* Serialize a pattern to the database. */
+static void pattern_serialize(database_handle_t *db, alert_pattern_t *p)
+{
+	return_if_fail(db != NULL);
+	return_if_fail(p != NULL);
 
-typedef struct alert_criteria_ alert_criteria_t;
-typedef struct alert_action_ alert_action_t;
-typedef struct alert_ alert_t;
+	db_write_int(db, p->type);
 
-/* A constructor for an alert criteria. */
-typedef struct {
-	char *name;
+	switch(p->type)
+	{
+		case PAT_GLOB:
+			db_write_word(db, p->pattern.glob);
+			break;
 
-	alert_criteria_t *(*prepare)(char **args);
-	bool (*exec)(user_t *u, alert_criteria_t *c);
-	void (*cleanup)(alert_criteria_t *c);
+		case PAT_REGEX:
+			db_write_word(db, p->pattern.regex.pattern);
+			db_write_int(db, p->pattern.regex.flags);
+			break;
+	}
+}
 
-	void (*display)(char *s, size_t size, alert_criteria_t *c);
-
-	alert_event_t event_mask;
-} alert_criteria_constructor_t;
-
-/* An alert criteria. */
-struct alert_criteria_ {
-	alert_criteria_constructor_t *cons;
-};
-
-typedef struct {
-	alert_criteria_t base;
-	alert_pattern_t *pattern;
-} alert_nick_criteria_t;
-
-alert_criteria_t *alert_nick_criteria_prepare(char **args)
+static alert_criteria_t *alert_nick_criteria_prepare(char **args)
 {
 	alert_nick_criteria_t *criteria;
 	alert_pattern_t *pattern;
@@ -212,7 +198,7 @@ alert_criteria_t *alert_nick_criteria_prepare(char **args)
 	criteria->pattern = pattern;
 }
 
-bool alert_nick_criteria_exec(user_t *u, alert_criteria_t *c)
+static bool alert_nick_criteria_exec(user_t *u, alert_criteria_t *c)
 {
 	alert_nick_criteria_t *criteria = (alert_nick_criteria_t *)c;
 
@@ -222,7 +208,7 @@ bool alert_nick_criteria_exec(user_t *u, alert_criteria_t *c)
 	return pattern_match(criteria->pattern, u->nick);
 }
 
-void alert_nick_criteria_cleanup(alert_criteria_t *c)
+static void alert_nick_criteria_cleanup(alert_criteria_t *c)
 {
 	alert_nick_criteria_t *criteria = (alert_nick_criteria_t *)c;
 
@@ -232,17 +218,25 @@ void alert_nick_criteria_cleanup(alert_criteria_t *c)
 	free(criteria);
 }
 
-void alert_nick_criteria_display(char *s, size_t size, alert_criteria_t *c)
+static void alert_nick_criteria_display(char *s, size_t size, alert_criteria_t *c)
 {
 	alert_nick_criteria_t *criteria = (alert_nick_criteria_t *)c;
 
 	return_if_fail(c != NULL);
 	return_if_fail(c != NULL);
 
-	if (criteria->pattern->type == PAT_GLOB)
-		snappendf(s, size, " NICK %s", criteria->pattern->pattern.glob);
-	else
-		snappendf(s, size, " NICK %s", criteria->pattern->pattern.regex.pattern);
+	snappendf(s, size, " NICK");
+	pattern_display(s, size, criteria->pattern);
+}
+
+static void alert_criteria_nick_serialize(database_handle_t *db, alert_criteria_t *c)
+{
+	alert_nick_criteria_t *criteria = (alert_nick_criteria_t *)c;
+
+	return_if_fail(db != NULL);
+	return_if_fail(c != NULL);
+
+	pattern_serialize(db, criteria->pattern);
 }
 
 alert_criteria_constructor_t alert_nick_criteria = {
@@ -252,36 +246,9 @@ alert_criteria_constructor_t alert_nick_criteria = {
 	EVT_CONNECT | EVT_NICK
 };
 
-/* A constructor for an alert action. */
-typedef struct {
-	char *name;
-
-	alert_action_t *(*prepare)(sourceinfo_t *si, char **args);
-	void (*exec)(user_t *u, alert_action_t *a);
-	void (*cleanup)(alert_action_t *a);
-} alert_action_constructor_t;
-
-/* An alert action. */
-struct alert_action_ {
-	alert_action_constructor_t *cons;
-	alert_t *alert;
-};
-
-/* An alert */
-struct alert_ {
-	char *owner;              /* Who owns the alert. This is an entity name. */
-	alert_event_t event_mask; /* What events this triggers on. */
-	alert_action_t *action;   /* The alert action. */
-	mowgli_list_t criteria;   /* The list of criteria. */
-
-	mowgli_node_t *node;       /* The pointer in nodes */
-	mowgli_node_t *owned_node; /* The pointer in owned_nodes */
-};
-
-static alert_action_t *alert_notice_action_prepare(sourceinfo_t *si, char **args)
+static alert_action_t *alert_notice_action_prepare(char **args)
 {
-	return_val_if_fail(si != NULL, NULL);
-
+	(void)args;
 	return smalloc(sizeof(alert_action_t));
 }
 
@@ -307,9 +274,15 @@ static void alert_notice_action_cleanup(alert_action_t *a)
 	free(a);
 }
 
+static void alert_notice_action_display(char *s, size_t len, alert_action_t *a)
+{
+	snappendf(s, len, "NOTICE");
+}
+
 alert_action_constructor_t alert_notice_action = {
 	"NOTICE", alert_notice_action_prepare,
-	alert_notice_action_exec, alert_notice_action_cleanup
+	alert_notice_action_exec, alert_notice_action_cleanup,
+	alert_notice_action_display
 };
 
 static void exec_events(user_t *u, alert_event_t event_mask);
@@ -332,12 +305,21 @@ static void user_nickchanged(hook_user_nick_t *n)
 		exec_events(n->u, EVT_NICK);
 }
 
+/* Write an alert_t to the database. */
+static void serialize(database_handle_t *db, alert_t *alert);
+
+/* Write all alerts to the database. */
+static void serialize_all(database_handle_t *db);
+
+/* Read an alert_t from the database and add it to the list of alerts. */
+static void deserialize(database_handle_t *db, const char *type);
+
 /*
  * Add-on interface.
  *
- * This allows third-party module writers to extend the alert API. Just copy
- * the prototypes out of os_alert.c, and add the alert_cmdtree symbol to your
- * module with MODULE_TRY_REQUEST_SYMBOL().
+ * This allows third-party module writers to extend the alert API. Just include
+ * "os_alert.h" and add the alert_cmdtree symbol to your module with
+ * MODULE_TRY_REQUEST_SYMBOL().
  *
  * Then add your criteria to the tree with mowgli_patricia_add().
  */
@@ -377,7 +359,11 @@ void _modinit(module_t *module)
 
 	hook_add_event("user_nickchange");
 	hook_add_user_nickchange(user_nickchanged);
+
+	db_register_type_handler("ALERT", deserialize);
+	hook_add_db_write(serialize_all);
 }
+
 
 /* Destroy an alert and remove it from all lists */
 static void alert_destroy(alert_t *alert)
@@ -416,7 +402,7 @@ static void alert_destroy(alert_t *alert)
 	free(alert->owner);
 }
 
-void owned_alerts_cleanup(const char *key, void *data, void *unused)
+static void owned_alerts_cleanup(const char *key, void *data, void *unused)
 {
 	mowgli_node_free(data);
 	(void)unused;
@@ -444,8 +430,9 @@ void _moddeinit(module_unload_intent_t intent)
 		alert_destroy(alerts.head->data);
 
 	mowgli_patricia_destroy(owned_alerts, owned_alerts_cleanup, NULL);
-}
 
+	db_unregister_type_handler("ALERT");
+}
 
 static void os_cmd_alert(sourceinfo_t *si, int parc, char *parv[])
 {
@@ -471,9 +458,8 @@ static void os_cmd_alert(sourceinfo_t *si, int parc, char *parv[])
 	command_exec(si->service, si, c, parc - 1, parv + 1);
 }
 
-static void os_cmd_alert_add(sourceinfo_t *si, int parc, char *parv[])
+static int parse_alert(myuser_t *mu, alert_action_constructor_t *actcons, char **args)
 {
-	alert_action_constructor_t *actcons = NULL;
 	alert_action_t *action = NULL;
 	alert_event_t event_mask = 0;
 	alert_t *alert;
@@ -481,30 +467,14 @@ static void os_cmd_alert_add(sourceinfo_t *si, int parc, char *parv[])
 	mowgli_list_t criteria_list = { NULL, NULL, 0 };
 	mowgli_list_t *owned_alerts_list = NULL;
 
-	char *args = parv[1];
 	bool failed = false;
 
-	if (!parv[0])
-	{
-		command_fail(si, fault_badparams, STR_INVALID_PARAMS, "ALERT ADD");
-		command_fail(si, fault_badparams, _("Syntax: ALERT ADD <action> <params>"));
-		return;
-	}
+	return_val_if_fail(mu != NULL, -1);
 
-	actcons = mowgli_patricia_retrieve(alert_acttree, parv[0]);
-	if (actcons == NULL)
-	{
-		command_fail(si, fault_badparams, STR_INVALID_PARAMS, "ALERT");
-		command_fail(si, fault_badparams, _("Syntax: ALERT ADD <action> <params>"));
-		return;
-	}
-
-	action = actcons->prepare(si, &args);
+	action = actcons->prepare(args);
 	if (action == NULL)
-	{
-		command_fail(si, fault_nosuch_target, _("Invalid criteria specified."));
-		return;
-	}
+		return -1;
+	
 	action->cons = actcons;
 
 	/* Parse out all the criteria. */
@@ -513,7 +483,7 @@ static void os_cmd_alert_add(sourceinfo_t *si, int parc, char *parv[])
 		alert_criteria_constructor_t *cons;
 		alert_criteria_t *criteria;
 
-		char *cmd = strtok(args, " ");
+		char *cmd = strtok(*args, " ");
 
 		if (cmd == NULL)
 		{
@@ -525,30 +495,27 @@ static void os_cmd_alert_add(sourceinfo_t *si, int parc, char *parv[])
 		cons = mowgli_patricia_retrieve(alert_cmdtree, cmd);
 		if (cons == NULL)
 		{
-			command_fail(si, fault_nosuch_target, _("Invalid criteria specified."));
 			failed = true;
 			break;
 		}
 
-		args = strtok(NULL, "");
+		*args = strtok(NULL, "");
 		if (args == NULL)
 		{
-			command_fail(si, fault_nosuch_target, _("Invalid criteria specified."));
 			failed = true;
 			break;
 
 		}
 
-		criteria = cons->prepare(&args);
-		slog(LG_DEBUG, "operserv/alert: adding criteria %p(%s) to list [remain: %s]", criteria, cmd, args);
+		criteria = cons->prepare(args);
+		slog(LG_DEBUG, "operserv/alert: adding criteria (%s) to list [remain: %s]", cmd, *args);
 		if (criteria == NULL)
 		{
-			command_fail(si, fault_nosuch_target, _("Invalid criteria specified."));
 			failed = true;
 			break;
 		}
 
-		slog(LG_DEBUG, "operserv/alert: new args position [%s]", args);
+		slog(LG_DEBUG, "operserv/alert: new args position [%s]", *args);
 
 		criteria->cons = cons;
 		event_mask |= cons->event_mask;
@@ -556,7 +523,6 @@ static void os_cmd_alert_add(sourceinfo_t *si, int parc, char *parv[])
 		mowgli_node_add(criteria, mowgli_node_create(), &criteria_list);
 	}
 
-	/* If we fail at any point, we must clean up the list of criteria. */
 	if (failed)
 	{
 		while (criteria_list.count != 0)
@@ -568,11 +534,11 @@ static void os_cmd_alert_add(sourceinfo_t *si, int parc, char *parv[])
 			mowgli_node_delete(node, &criteria_list);
 			mowgli_node_free(node);
 		}
-		return;
+		return -1;
 	}
 
 	alert = smalloc(sizeof(alert_t));
-	alert->owner = sstrdup(entity(si->smu)->name);
+	alert->owner = sstrdup(entity(mu)->name);
 	alert->action = action;
 	alert->action->alert = alert;
 	alert->criteria = criteria_list;
@@ -593,10 +559,39 @@ static void os_cmd_alert_add(sourceinfo_t *si, int parc, char *parv[])
 		owned_alerts_list = mowgli_list_create();
 		mowgli_patricia_add(owned_alerts, alert->owner, owned_alerts_list);
 	}
+
 	/* Add the alert to the owner's list of alerts. */
 	mowgli_node_add(alert, alert->owned_node, owned_alerts_list);
 
-	command_success_nodata(si, _("Added alert \x02%d\x02."), owned_alerts_list->count);
+	return owned_alerts_list->count;
+}
+
+static void os_cmd_alert_add(sourceinfo_t *si, int parc, char *parv[])
+{
+	alert_action_constructor_t *actcons = NULL;
+	int id;
+
+	if (!parv[0])
+	{
+		command_fail(si, fault_badparams, STR_INVALID_PARAMS, "ALERT ADD");
+		command_fail(si, fault_badparams, _("Syntax: ALERT ADD <action> <params>"));
+		return;
+	}
+
+
+	actcons = mowgli_patricia_retrieve(alert_acttree, parv[0]);
+	if (actcons == NULL)
+	{
+		command_fail(si, fault_badparams, STR_INVALID_PARAMS, "ALERT");
+		command_fail(si, fault_badparams, _("Syntax: ALERT ADD <action> <params>"));
+		return;
+	}
+
+	id = parse_alert(si->smu, actcons, &parv[1]);
+	if (id < 0)
+		command_fail(si, fault_nosuch_target, _("Invalid criteria specified."));
+	else
+		command_success_nodata(si, _("Added alert \x02%d\x02."), id);
 }
 
 static void os_cmd_alert_del(sourceinfo_t *si, int parc, char *parv[])
@@ -654,7 +649,7 @@ static void os_cmd_alert_list(sourceinfo_t *si, int parc, char *parv[])
 			alert_t *alert = node->data;
 			mowgli_node_t *criteria_node = NULL;
 			char buf[512] = {0};
-
+			alert->action->cons->display(buf, sizeof(buf), alert->action);
 			MOWGLI_LIST_FOREACH(criteria_node, alert->criteria.head)
 			{
 				alert_criteria_t *criteria = criteria_node->data;
@@ -663,7 +658,7 @@ static void os_cmd_alert_list(sourceinfo_t *si, int parc, char *parv[])
 				cons->display(buf, sizeof(buf), criteria);
 			}
 
-			command_success_nodata(si, "Alert: %d %s%s", i, alert->action->cons->name, buf);
+			command_success_nodata(si, "Alert %d: %s", i, buf);
 			i++;
 		}
 		command_success_nodata(si, _("End of alerts."));
@@ -709,4 +704,59 @@ static void exec_events(user_t *u, alert_event_t event_mask)
 			}
 		}
 	}
+}
+
+static void deserialize(database_handle_t *db, const char *type)
+{
+	mowgli_node_t *node;
+	const char *owner = db_sread_word(db);
+	myuser_t *mu = myuser_find_ext(owner);
+	const char *action_name = db_sread_word(db);
+	alert_action_constructor_t *actcons = NULL;
+	const char *args = db_sread_str(db);
+	char *modified_args = NULL;
+
+	return_if_fail(mu != NULL);
+
+	actcons = mowgli_patricia_retrieve(alert_acttree, action_name);
+	if (actcons == NULL)
+		slog(LG_ERROR, "os/alert: could not parse action (%s) from db", action_name);
+	else
+	{
+		const char *readonly_args = db_sread_str(db);
+		char *args = sstrdup(readonly_args);
+		char *modified_args = args;
+
+		if (parse_alert(mu, actcons, &modified_args) < 0)
+			slog(LG_ERROR, "Could not parse alert: action=(%s) args=[%s]", action_name, args);
+
+		free(args);
+	}
+}
+
+static void serialize(database_handle_t *db, alert_t *alert)
+{
+	mowgli_node_t *node;
+	char buffer[512] = {0};
+ 
+	db_start_row(db, "ALERT");
+	db_write_word(db, alert->owner);
+
+	alert->action->cons->display(buffer, sizeof(buffer), alert->action);
+
+	MOWGLI_LIST_FOREACH(node, alert->criteria.head)
+	{
+		alert_criteria_t *criteria = node->data;
+		criteria->cons->display(buffer, sizeof(buffer), criteria);
+	}
+
+	db_write_str(db, buffer);
+	db_commit_row(db);
+}
+
+static void serialize_all(database_handle_t *db)
+{
+	mowgli_node_t *node;
+	MOWGLI_LIST_FOREACH(node, alerts.head)
+		serialize(db, node->data);
 }
