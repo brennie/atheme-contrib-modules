@@ -294,6 +294,15 @@ static void user_added(hook_user_nick_t *n)
 		exec_events(n->u, EVT_CONNECT);
 }
 
+static void user_nickchanged(hook_user_nick_t *n)
+{
+	return_if_fail(n != NULL);
+	return_if_fail(n->u != NULL);
+
+	if (!is_internal_client(n->u))
+		exec_events(n->u, EVT_NICK);
+}
+
 /*
  * Add-on interface.
  *
@@ -336,6 +345,9 @@ void _modinit(module_t *module)
 
 	hook_add_event("user_add");
 	hook_add_user_add(user_added);
+
+	hook_add_event("user_nickchange");
+	hook_add_user_nickchange(user_nickchanged);
 }
 
 /* Destroy an alert and remove it from all lists */
