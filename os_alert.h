@@ -34,8 +34,6 @@ typedef struct alert_ alert_t;
 
 /* A constructor for an alert criteria. */
 typedef struct {
-	char *name;
-
 	alert_criteria_t *(*prepare)(char **args);
 	bool (*exec)(user_t *u, alert_criteria_t *c);
 	void (*cleanup)(alert_criteria_t *c);
@@ -53,12 +51,10 @@ struct alert_criteria_ {
 typedef struct {
 	alert_criteria_t base;
 	alert_pattern_t *pattern;
-} alert_nick_criteria_t;
+} alert_pattern_criteria_t;
 
 /* A constructor for an alert action. */
 typedef struct {
-	char *name;
-
 	alert_action_t *(*prepare)(char **args);
 	void (*exec)(user_t *u, alert_action_t *a);
 	void (*cleanup)(alert_action_t *a);

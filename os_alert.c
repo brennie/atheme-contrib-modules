@@ -162,30 +162,9 @@ static bool pattern_match(alert_pattern_t *p, const char *s)
 	}
 }
 
-/* Serialize a pattern to the database. */
-static void pattern_serialize(database_handle_t *db, alert_pattern_t *p)
+static alert_criteria_t *alert_pattern_criteria_prepare(char **args)
 {
-	return_if_fail(db != NULL);
-	return_if_fail(p != NULL);
-
-	db_write_int(db, p->type);
-
-	switch(p->type)
-	{
-		case PAT_GLOB:
-			db_write_word(db, p->pattern.glob);
-			break;
-
-		case PAT_REGEX:
-			db_write_word(db, p->pattern.regex.pattern);
-			db_write_int(db, p->pattern.regex.flags);
-			break;
-	}
-}
-
-static alert_criteria_t *alert_nick_criteria_prepare(char **args)
-{
-	alert_nick_criteria_t *criteria;
+	alert_pattern_criteria_t *criteria;
 	alert_pattern_t *pattern;
 
 	return_val_if_fail(args != NULL, NULL);
@@ -194,23 +173,23 @@ static alert_criteria_t *alert_nick_criteria_prepare(char **args)
 	pattern = pattern_extract(args, false);
 	return_val_if_fail(pattern != NULL, NULL);
 
-	criteria = smalloc(sizeof(alert_nick_criteria_t));
+	criteria = smalloc(sizeof(alert_pattern_criteria_t));
 	criteria->pattern = pattern;
 }
 
 static bool alert_nick_criteria_exec(user_t *u, alert_criteria_t *c)
 {
-	alert_nick_criteria_t *criteria = (alert_nick_criteria_t *)c;
+	alert_pattern_criteria_t *criteria = (alert_pattern_criteria_t *)c;
 
-	return_val_if_fail(u != NULL, NULL);
-	return_val_if_fail(c != NULL, NULL);
+	return_val_if_fail(u != NULL, false);
+	return_val_if_fail(c != NULL, false);
 
 	return pattern_match(criteria->pattern, u->nick);
 }
 
-static void alert_nick_criteria_cleanup(alert_criteria_t *c)
+static void alert_pattern_criteria_cleanup(alert_criteria_t *c)
 {
-	alert_nick_criteria_t *criteria = (alert_nick_criteria_t *)c;
+	alert_pattern_criteria_t *criteria = (alert_pattern_criteria_t *)c;
 
 	return_if_fail(c != NULL);
 
@@ -220,7 +199,7 @@ static void alert_nick_criteria_cleanup(alert_criteria_t *c)
 
 static void alert_nick_criteria_display(char *s, size_t size, alert_criteria_t *c)
 {
-	alert_nick_criteria_t *criteria = (alert_nick_criteria_t *)c;
+	alert_pattern_criteria_t *criteria = (alert_pattern_criteria_t *)c;
 
 	return_if_fail(c != NULL);
 	return_if_fail(c != NULL);
@@ -229,21 +208,37 @@ static void alert_nick_criteria_display(char *s, size_t size, alert_criteria_t *
 	pattern_display(s, size, criteria->pattern);
 }
 
-static void alert_criteria_nick_serialize(database_handle_t *db, alert_criteria_t *c)
-{
-	alert_nick_criteria_t *criteria = (alert_nick_criteria_t *)c;
-
-	return_if_fail(db != NULL);
-	return_if_fail(c != NULL);
-
-	pattern_serialize(db, criteria->pattern);
-}
-
 alert_criteria_constructor_t alert_nick_criteria = {
-	"NICK",
-	alert_nick_criteria_prepare, alert_nick_criteria_exec, alert_nick_criteria_cleanup,
+	alert_pattern_criteria_prepare, alert_nick_criteria_exec, alert_pattern_criteria_cleanup,
 	alert_nick_criteria_display,
 	EVT_CONNECT | EVT_NICK
+};
+
+static bool alert_user_criteria_exec(user_t *u, alert_criteria_t *c)
+{
+	alert_pattern_criteria_t *criteria = (alert_pattern_criteria_t *)c;
+
+	return_val_if_fail(u != NULL, false);
+	return_val_if_fail(c != NULL, false);
+
+	return pattern_match(criteria->pattern, u->user);
+}
+
+static void alert_user_criteria_display(char *s, size_t size, alert_criteria_t *c)
+{
+	alert_pattern_criteria_t *criteria = (alert_pattern_criteria_t *)c;
+
+	return_if_fail(c != NULL);
+	return_if_fail(c != NULL);
+
+	snappendf(s, size, " USER");
+	pattern_display(s, size, criteria->pattern);
+}
+
+alert_criteria_constructor_t alert_user_criteria = {
+	alert_pattern_criteria_prepare, alert_user_criteria_exec, alert_pattern_criteria_cleanup,
+	alert_user_criteria_display,
+	EVT_CONNECT
 };
 
 static alert_action_t *alert_notice_action_prepare(char **args)
@@ -280,8 +275,7 @@ static void alert_notice_action_display(char *s, size_t len, alert_action_t *a)
 }
 
 alert_action_constructor_t alert_notice_action = {
-	"NOTICE", alert_notice_action_prepare,
-	alert_notice_action_exec, alert_notice_action_cleanup,
+	alert_notice_action_prepare, alert_notice_action_exec, alert_notice_action_cleanup,
 	alert_notice_action_display
 };
 
@@ -342,10 +336,11 @@ void _modinit(module_t *module)
 	service_bind_command(operserv, &os_alert);
 
 	alert_cmdtree = mowgli_patricia_create(strcasecanon);
-	mowgli_patricia_add(alert_cmdtree, alert_nick_criteria.name, &alert_nick_criteria);
+	mowgli_patricia_add(alert_cmdtree, "NICK", &alert_nick_criteria);
+	mowgli_patricia_add(alert_cmdtree, "USER", &alert_user_criteria);
 
 	alert_acttree = mowgli_patricia_create(strcasecanon);
-	mowgli_patricia_add(alert_acttree, alert_notice_action.name, &alert_notice_action);
+	mowgli_patricia_add(alert_acttree, "NOTICE", &alert_notice_action);
 
 	owned_alerts = mowgli_patricia_create(strcasecanon);
 
@@ -412,10 +407,11 @@ void _moddeinit(module_unload_intent_t intent)
 {
 	service_unbind_command(operserv, &os_alert);
 
-	mowgli_patricia_delete(alert_cmdtree, alert_nick_criteria.name);
+	mowgli_patricia_delete(alert_cmdtree, "NICK");
+	mowgli_patricia_delete(alert_cmdtree, "USER");
 	mowgli_patricia_destroy(alert_cmdtree, NULL, NULL);
 
-	mowgli_patricia_delete(alert_acttree, alert_notice_action.name);
+	mowgli_patricia_delete(alert_acttree, "NOTICE");
 	mowgli_patricia_destroy(alert_acttree, NULL, NULL);
 
 	command_delete(&os_alert_add, os_alert_cmds);
@@ -582,7 +578,7 @@ static void os_cmd_alert_add(sourceinfo_t *si, int parc, char *parv[])
 	actcons = mowgli_patricia_retrieve(alert_acttree, parv[0]);
 	if (actcons == NULL)
 	{
-		command_fail(si, fault_badparams, STR_INVALID_PARAMS, "ALERT");
+		command_fail(si, fault_badparams, STR_INVALID_PARAMS, "ALERT ADD");
 		command_fail(si, fault_badparams, _("Syntax: ALERT ADD <action> <params>"));
 		return;
 	}
