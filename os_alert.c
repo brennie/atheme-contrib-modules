@@ -392,6 +392,33 @@ alert_criteria_constructor_t alert_mask_criteria = {
 	EVT_CONNECT | EVT_NICK
 };
 
+static bool alert_server_criteria_exec(user_t *u, alert_criteria_t *c)
+{
+	alert_pattern_criteria_t *criteria = (alert_pattern_criteria_t *)c;
+
+	return_val_if_fail(u != NULL, false);
+	return_val_if_fail(c != NULL, false);
+
+	return pattern_match(criteria->pattern, u->server->name);
+}
+
+static void alert_server_criteria_display(char *s, size_t size, alert_criteria_t *c)
+{
+	alert_pattern_criteria_t *criteria = (alert_pattern_criteria_t *)c;
+
+	return_if_fail(s != NULL);
+	return_if_fail(c != NULL);
+
+	snappendf(s, size, " SERVER");
+	pattern_display(s, size, criteria->pattern);
+}
+
+alert_criteria_constructor_t alert_server_criteria = {
+	alert_pattern_criteria_prepare, alert_server_criteria_exec, alert_pattern_criteria_cleanup,
+	alert_server_criteria_display,
+	EVT_CONNECT
+};
+
 static alert_action_t *alert_notice_action_prepare(char **args)
 {
 	(void)args;
@@ -481,6 +508,7 @@ void _modinit(module_t *module)
 	mowgli_patricia_add(alert_cmdtree, "HOST", &alert_host_criteria);
 	mowgli_patricia_add(alert_cmdtree, "IP", &alert_ip_criteria);
 	mowgli_patricia_add(alert_cmdtree, "MASK", &alert_mask_criteria);
+	mowgli_patricia_add(alert_cmdtree, "SERVER", &alert_server_criteria);
 
 	alert_acttree = mowgli_patricia_create(strcasecanon);
 	mowgli_patricia_add(alert_acttree, "NOTICE", &alert_notice_action);
@@ -556,6 +584,7 @@ void _moddeinit(module_unload_intent_t intent)
 	mowgli_patricia_delete(alert_cmdtree, "HOST");
 	mowgli_patricia_delete(alert_cmdtree, "IP");
 	mowgli_patricia_delete(alert_cmdtree, "MASK");
+	mowgli_patricia_delete(alert_cmdtree, "SERVER");
 	mowgli_patricia_destroy(alert_cmdtree, NULL, NULL);
 
 	mowgli_patricia_delete(alert_acttree, "NOTICE");
