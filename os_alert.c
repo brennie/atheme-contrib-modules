@@ -158,8 +158,10 @@ static void pattern_display(char *s, size_t len, alert_pattern_t *p)
 		if (p->pattern.regex.flags & AREGEX_PCRE)
 			snappendf(s, len, "p");
 	}
-	else
+	else if (strchr(p->pattern.glob, ' ') == NULL)
 		snappendf(s, len, " %s", p->pattern.glob);
+	else
+		snappendf(s, len, " \"%s\"", p->pattern.glob);
 }
 
 /* Do a pattern match with the given pattern against the string s. */
@@ -194,6 +196,8 @@ static alert_criteria_t *alert_pattern_criteria_prepare(char **args)
 
 	criteria = smalloc(sizeof(alert_pattern_criteria_t));
 	criteria->pattern = pattern;
+
+	return (alert_criteria_t *)criteria;
 }
 
 static bool alert_nick_criteria_exec(user_t *u, alert_criteria_t *c)
@@ -257,6 +261,50 @@ static void alert_user_criteria_display(char *s, size_t size, alert_criteria_t *
 alert_criteria_constructor_t alert_user_criteria = {
 	alert_pattern_criteria_prepare, alert_user_criteria_exec, alert_pattern_criteria_cleanup,
 	alert_user_criteria_display,
+	EVT_CONNECT
+};
+
+static alert_criteria_t *alert_gecos_criteria_prepare(char **args)
+{
+	alert_pattern_criteria_t *criteria;
+	alert_pattern_t *pattern;
+
+	return_val_if_fail(args != NULL, NULL);
+	return_val_if_fail(*args != NULL, NULL);
+
+	pattern = pattern_extract(args, true);
+	return_val_if_fail(pattern != NULL, NULL);
+
+	criteria = smalloc(sizeof(alert_pattern_criteria_t));
+	criteria->pattern = pattern;
+
+	return (alert_criteria_t *)criteria;
+}
+
+static bool alert_gecos_criteria_exec(user_t *u, alert_criteria_t *c)
+{
+	alert_pattern_criteria_t *criteria = (alert_pattern_criteria_t *)c;
+
+	return_val_if_fail(u != NULL, false);
+	return_val_if_fail(c != NULL, false);
+
+	return pattern_match(criteria->pattern, u->gecos);
+}
+
+static void alert_gecos_criteria_display(char *s, size_t size, alert_criteria_t *c)
+{
+	alert_pattern_criteria_t *criteria = (alert_pattern_criteria_t *)c;
+
+	return_if_fail(s != NULL);
+	return_if_fail(c != NULL);
+
+	snappendf(s, size, " GECOS");
+	pattern_display(s, size, criteria->pattern);
+}
+
+alert_criteria_constructor_t alert_gecos_criteria = {
+	alert_gecos_criteria_prepare, alert_gecos_criteria_exec, alert_pattern_criteria_cleanup,
+	alert_gecos_criteria_display,
 	EVT_CONNECT
 };
 
@@ -345,6 +393,7 @@ void _modinit(module_t *module)
 	alert_cmdtree = mowgli_patricia_create(strcasecanon);
 	mowgli_patricia_add(alert_cmdtree, "NICK", &alert_nick_criteria);
 	mowgli_patricia_add(alert_cmdtree, "USER", &alert_user_criteria);
+	mowgli_patricia_add(alert_cmdtree, "GECOS", &alert_gecos_criteria);
 
 	alert_acttree = mowgli_patricia_create(strcasecanon);
 	mowgli_patricia_add(alert_acttree, "NOTICE", &alert_notice_action);
@@ -416,6 +465,7 @@ void _moddeinit(module_unload_intent_t intent)
 
 	mowgli_patricia_delete(alert_cmdtree, "NICK");
 	mowgli_patricia_delete(alert_cmdtree, "USER");
+	mowgli_patricia_delete(alert_cmdtree, "GECOS");
 	mowgli_patricia_destroy(alert_cmdtree, NULL, NULL);
 
 	mowgli_patricia_delete(alert_acttree, "NOTICE");
