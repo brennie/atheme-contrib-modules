@@ -783,8 +783,6 @@ static void exec_events(user_t *u, alert_event_t event_mask)
 	return_if_fail(u != NULL);
 	return_if_fail(event_mask != 0);
 
-
-
 	MOWGLI_LIST_FOREACH(alert_node, alerts.head)
 	{
 		alert_t *alert = alert_node->data;
