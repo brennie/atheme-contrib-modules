@@ -16,6 +16,25 @@ DECLARE_MODULE_V1
 	"Barret Rennie <barret@brennie.ca>"
 );
 
+/*
+ * Add-on interface.
+ *
+ * This allows third-party module writers to extend the alert API. Just include
+ * "os_alert.h" and add the alert_cmdtree symbol to your module with
+ * MODULE_TRY_REQUEST_SYMBOL().
+ *
+ * Then add your criteria to the tree with mowgli_patricia_add().
+ */
+mowgli_patricia_t *alert_cmdtree = NULL;
+mowgli_patricia_t *alert_acttree = NULL;
+
+/* The list of active alerts. */
+mowgli_list_t alerts = { NULL, NULL, 0 };
+
+/* A map of users (entity names) to mowgli_list_t of alerts with pointers into
+ * the all_alerts list. */
+mowgli_patricia_t *owned_alerts = NULL;
+
 /* Append to s using the pattern and variable args. */
 static void snappendf(char *s, size_t size, const char *pattern, ...)
 {
@@ -251,6 +270,8 @@ static void alert_notice_action_exec(user_t *u, alert_action_t *a)
 {
 	mowgli_node_t *node = NULL;
 	myentity_t *ent = NULL;
+	ssize_t index = -1;
+	mowgli_list_t *owned_alerts_list = NULL;
 
 	return_if_fail(u != NULL);
 	return_if_fail(a != NULL);
@@ -259,7 +280,12 @@ static void alert_notice_action_exec(user_t *u, alert_action_t *a)
 	return_if_fail(ent != NULL);
 	return_if_fail(isuser(ent));
 
-	myuser_notice(operserv->nick, (myuser_t *)ent, "\2Alert:\2  %s!%s@%s %s {%s}", u->nick, u->user, u->host, u->gecos, u->server->name);
+	owned_alerts_list = mowgli_patricia_retrieve(owned_alerts, a->alert->owner);
+	return_if_fail(owned_alerts != NULL);
+
+	index = 1 + mowgli_node_index(a->alert->owned_node, owned_alerts_list);
+
+	myuser_notice(operserv->nick, (myuser_t *)ent, "\2Alert (%d):\2  %s!%s@%s %s {%s}", index, u->nick, u->user, u->host, u->gecos, u->server->name);
 }
 
 static void alert_notice_action_cleanup(alert_action_t *a)
@@ -307,25 +333,6 @@ static void serialize_all(database_handle_t *db);
 
 /* Read an alert_t from the database and add it to the list of alerts. */
 static void deserialize(database_handle_t *db, const char *type);
-
-/*
- * Add-on interface.
- *
- * This allows third-party module writers to extend the alert API. Just include
- * "os_alert.h" and add the alert_cmdtree symbol to your module with
- * MODULE_TRY_REQUEST_SYMBOL().
- *
- * Then add your criteria to the tree with mowgli_patricia_add().
- */
-mowgli_patricia_t *alert_cmdtree = NULL;
-mowgli_patricia_t *alert_acttree = NULL;
-
-/* The list of active alerts. */
-mowgli_list_t alerts = { NULL, NULL, 0 };
-
-/* A map of users (entity names) to mowgli_list_t of alerts with pointers into
- * the all_alerts list. */
-mowgli_patricia_t *owned_alerts = NULL;
 
 /* Sub-command tree. */
 mowgli_patricia_t *os_alert_cmds = NULL;
