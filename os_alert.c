@@ -484,6 +484,24 @@ static void user_nickchanged(hook_user_nick_t *n)
 		exec_events(n->u, EVT_NICK);
 }
 
+static void channel_joined(hook_channel_joinpart_t *n)
+{
+	return_if_fail(n != NULL);
+	return_if_fail(n->cu != NULL);
+
+	if (!is_internal_client(n->cu->user))
+		exec_events(n->cu->user, EVT_JOIN);
+}
+
+static void channel_parted(hook_channel_joinpart_t *n)
+{
+	return_if_fail(n != NULL);
+	return_if_fail(n->cu != NULL);
+
+	if (!is_internal_client(n->cu->user))
+		exec_events(n->cu->user, EVT_PART);
+}
+
 /* Write an alert_t to the database. */
 static void serialize(database_handle_t *db, alert_t *alert);
 
@@ -525,6 +543,12 @@ void _modinit(module_t *module)
 
 	hook_add_event("user_nickchange");
 	hook_add_user_nickchange(user_nickchanged);
+
+	hook_add_event("channel_join");
+	hook_add_channel_join(channel_joined);
+
+	hook_add_event("channel_part");
+	hook_add_channel_part(channel_parted);
 
 	db_register_type_handler("ALERT", deserialize);
 	hook_add_db_write(serialize_all);
@@ -604,6 +628,12 @@ void _moddeinit(module_unload_intent_t intent)
 	mowgli_patricia_destroy(owned_alerts, owned_alerts_cleanup, NULL);
 
 	db_unregister_type_handler("ALERT");
+
+	hook_del_user_add(user_added);
+	hook_del_user_nickchange(user_nickchanged);
+	hook_del_channel_join(channel_joined);
+	hook_del_channel_part(channel_parted);
+
 }
 
 static void os_cmd_alert(sourceinfo_t *si, int parc, char *parv[])
