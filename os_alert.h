@@ -23,9 +23,12 @@ typedef enum {
 	EVT_CONNECT  = 0x01,
 	EVT_IDENTIFY = 0x02,
 	EVT_REGISTER = 0x04,
-	EVT_JOIN     = 0x08,
-	EVT_PART     = 0x10,
-	EVT_NICK     = 0x20
+	EVT_DROP     = 0x08,
+	EVT_HOST     = 0x10,
+	EVT_JOIN     = 0x20,
+	EVT_PART     = 0x40,
+	EVT_NICK     = 0x80
+	
 } alert_event_t;
 
 typedef struct alert_criteria_ alert_criteria_t;

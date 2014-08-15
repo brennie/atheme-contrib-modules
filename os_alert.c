@@ -332,7 +332,7 @@ static void alert_host_criteria_display(char *s, size_t size, alert_criteria_t *
 alert_criteria_constructor_t alert_host_criteria = {
 	alert_pattern_criteria_prepare, alert_host_criteria_exec, alert_pattern_criteria_cleanup,
 	alert_host_criteria_display,
-	EVT_CONNECT
+	EVT_CONNECT | EVT_HOST
 };
 
 static bool alert_ip_criteria_exec(user_t *u, alert_criteria_t *c)
@@ -389,7 +389,7 @@ static void alert_mask_criteria_display(char *s, size_t size, alert_criteria_t *
 alert_criteria_constructor_t alert_mask_criteria = {
 	alert_pattern_criteria_prepare, alert_mask_criteria_exec, alert_pattern_criteria_cleanup,
 	alert_mask_criteria_display,
-	EVT_CONNECT | EVT_NICK
+	EVT_CONNECT | EVT_NICK | EVT_HOST
 };
 
 static bool alert_server_criteria_exec(user_t *u, alert_criteria_t *c)
@@ -502,6 +502,52 @@ static void channel_parted(hook_channel_joinpart_t *n)
 		exec_events(n->cu->user, EVT_PART);
 }
 
+static void user_registered(myuser_t *mu)
+{
+	mowgli_node_t *node = NULL;
+
+	return_if_fail(mu != NULL);
+
+	MOWGLI_LIST_FOREACH(node, mu->logins.head)
+	{
+		user_t *login = node->data;
+
+		if (!is_internal_client(login))
+			exec_events(login, EVT_REGISTER);
+	}
+}
+
+static void user_dropped(myuser_t *mu)
+{
+	mowgli_node_t *node = NULL;
+
+	return_if_fail(mu != NULL);
+
+	MOWGLI_LIST_FOREACH(node, mu->logins.head)
+	{
+		user_t *login = node->data;
+
+		if (!is_internal_client(login))
+			exec_events(login, EVT_DROP);
+	}
+}
+
+static void user_identified(user_t *u)
+{
+	return_if_fail(u != NULL);
+
+	if (!is_internal_client(u))
+		exec_events(u, EVT_IDENTIFY);
+}
+
+static void user_host_set(user_t *u)
+{
+	return_if_fail(u != NULL);
+
+	if (!is_internal_client(u))
+		exec_events(u, EVT_HOST);
+}
+
 /* Write an alert_t to the database. */
 static void serialize(database_handle_t *db, alert_t *alert);
 
@@ -549,6 +595,18 @@ void _modinit(module_t *module)
 
 	hook_add_event("channel_part");
 	hook_add_channel_part(channel_parted);
+
+	hook_add_event("user_registered");
+	hook_add_user_register(user_registered);
+
+	hook_add_event("user_dropped");
+	hook_add_user_drop(user_dropped);
+
+	hook_add_event("user_indentified");
+	hook_add_user_identify(user_identified);
+
+	hook_add_event("user_sethost");
+	hook_add_user_sethost(user_host_set);
 
 	db_register_type_handler("ALERT", deserialize);
 	hook_add_db_write(serialize_all);
@@ -631,9 +689,14 @@ void _moddeinit(module_unload_intent_t intent)
 
 	hook_del_user_add(user_added);
 	hook_del_user_nickchange(user_nickchanged);
+	
 	hook_del_channel_join(channel_joined);
 	hook_del_channel_part(channel_parted);
 
+	hook_del_user_register(user_registered);
+	hook_del_user_drop(user_dropped);
+	hook_del_user_identify(user_identified);
+	hook_del_user_sethost(user_host_set);
 }
 
 static void os_cmd_alert(sourceinfo_t *si, int parc, char *parv[])
