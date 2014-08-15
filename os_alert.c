@@ -557,6 +557,148 @@ alert_criteria_constructor_t alert_channel_criteria = {
 	EVT_JOIN
 };
 
+static alert_criteria_t *alert_numchan_criteria_prepare(char **args)
+{
+	alert_numchan_criteria_t *criteria;
+	alert_op_t op;
+	int numchans;
+
+	return_val_if_fail(args != NULL, NULL);
+	return_val_if_fail(*args != NULL, NULL);
+
+	while (**args == ' ')
+		(*args)++;
+
+	switch (**args)
+	{
+		case '>':
+			(*args)++;
+
+			if (**args == '=')
+			{
+				(*args)++;
+				op = OP_GEQ;
+			}
+			else
+				op = OP_GT;
+
+			break;
+
+		case '=':
+			(*args)++;
+			op = OP_EQ;
+			break;
+
+		case '<':
+			(*args)++;
+
+			if (**args == '=')
+			{
+				(*args)++;
+				op = OP_LEQ;
+			}
+			else
+				op = OP_LT;
+
+			break;
+
+		default:
+			return NULL;
+	}
+
+	while (**args == ' ')
+		(*args)++;
+
+	if (!isdigit(**args))
+		return NULL;
+
+	numchans = strtol(*args, NULL, 10);
+
+	if (numchans == OP_LT && numchans <= 0)
+		return NULL;
+
+	criteria = smalloc(sizeof(alert_numchan_criteria_t));
+	criteria->op = op;
+	criteria->numchans = numchans;
+
+	return (alert_criteria_t *)criteria;
+}
+
+static bool alert_numchan_criteria_exec(user_t *u, alert_criteria_t *c)
+{
+	alert_numchan_criteria_t *criteria = (alert_numchan_criteria_t *)c;
+
+	return_val_if_fail(c != NULL, false);
+	return_val_if_fail(criteria->op >=OP_LT && criteria->op <= OP_GT, false);
+
+	switch(criteria->op)
+	{
+		case OP_LT:
+			return u->channels.count < criteria->numchans;
+
+		case OP_LEQ:
+			return u->channels.count <= criteria->numchans;
+
+		case OP_EQ:
+			return u->channels.count == criteria->numchans;
+
+		case OP_GEQ:
+			return u->channels.count >= criteria->numchans;
+
+		case OP_GT:
+			return u->channels.count > criteria->numchans;
+	}
+
+	return false;
+}
+
+static void alert_numchan_criteria_cleanup(alert_criteria_t *c)
+{
+	alert_numchan_criteria_t *criteria = (alert_numchan_criteria_t *)c;
+
+	return_if_fail(c != NULL);
+
+	free(criteria);
+}
+
+static void alert_numchan_criteria_display(char *s, size_t size, alert_criteria_t *c)
+{
+	alert_numchan_criteria_t *criteria = (alert_numchan_criteria_t *)c;
+
+	return_if_fail(c != NULL);
+	return_if_fail(criteria->op >=OP_LT && criteria->op <= OP_GT);
+
+	switch(criteria->op)
+	{
+		case OP_LT:
+			snappendf(s, size, "<");
+			break;
+
+		case OP_LEQ:
+			snappendf(s, size, "<=");
+			break;
+
+		case OP_EQ:
+			snappendf(s, size, "=");
+			break;
+
+		case OP_GEQ:
+			snappendf(s, size, ">=");
+			break;
+
+		case OP_GT:
+			snappendf(s, size, ">");
+	}
+
+	snappendf(s, size, "%u", criteria->numchans);
+}
+
+alert_criteria_constructor_t alert_numchan_criteria = {
+	alert_numchan_criteria_prepare, alert_numchan_criteria_exec, alert_numchan_criteria_cleanup,
+	alert_numchan_criteria_display,
+	EVT_JOIN | EVT_PART
+};
+
 static alert_action_t *alert_notice_action_prepare(char **args)
 {
 	(void)args;
@@ -713,6 +855,7 @@ void _modinit(module_t *module)
 	mowgli_patricia_add(alert_cmdtree, "SERVER", &alert_server_criteria);
 	mowgli_patricia_add(alert_cmdtree, "IDENTIFIED", &alert_identified_criteria);
 	mowgli_patricia_add(alert_cmdtree, "CHANNEL", &alert_channel_criteria);
+	mowgli_patricia_add(alert_cmdtree, "NUMCHANS", &alert_numchan_criteria);
 
 	alert_acttree = mowgli_patricia_create(strcasecanon);
 	mowgli_patricia_add(alert_acttree, "NOTICE", &alert_notice_action);
@@ -809,6 +952,7 @@ void _moddeinit(module_unload_intent_t intent)
 	mowgli_patricia_delete(alert_cmdtree, "SERVER");
 	mowgli_patricia_delete(alert_cmdtree, "IDENTIFIED");
 	mowgli_patricia_delete(alert_cmdtree, "CHANNEL");
+	mowgli_patricia_delete(alert_cmdtree, "NUMCHANS");
 	mowgli_patricia_destroy(alert_cmdtree, NULL, NULL);
 
 	mowgli_patricia_delete(alert_acttree, "NOTICE");

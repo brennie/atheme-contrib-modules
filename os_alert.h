@@ -61,6 +61,20 @@ typedef struct {
 	bool identified;
 } alert_identified_criteria_t;
 
+typedef enum {
+	OP_LT  = 0,
+	OP_LEQ = 1,
+	OP_EQ  = 2,
+	OP_GEQ = 3,
+	OP_GT  = 4
+} alert_op_t;
+
+typedef struct {
+	alert_criteria_t base;
+	alert_op_t op;
+	size_t numchans;
+} alert_numchan_criteria_t;
+
 /* A constructor for an alert action. */
 typedef struct {
 	alert_action_t *(*prepare)(char **args);
