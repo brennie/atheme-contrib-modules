@@ -744,6 +744,49 @@ alert_action_constructor_t alert_notice_action = {
 	alert_notice_action_display
 };
 
+static void alert_noticeops_action_exec(user_t *u, alert_action_t *a)
+{
+	mowgli_node_t *alert_node = NULL;
+	mowgli_node_t *soper_node = NULL;
+
+	mowgli_list_t *owned_alerts_list = NULL;
+	ssize_t index = -1;
+
+	myentity_t *owner;
+
+	return_if_fail(u != NULL);
+	return_if_fail(a != NULL);
+
+	owner = myentity_find(a->alert->owner);
+	return_if_fail(owner != NULL);
+	return_if_fail(isuser(owner));
+
+	owned_alerts_list = mowgli_patricia_retrieve(owned_alerts, a->alert->owner);
+	return_if_fail(owned_alerts != NULL);
+
+	MOWGLI_LIST_FOREACH(soper_node, soperlist.head)
+	{
+		soper_t *soper = soper_node->data;
+		myuser_t *myuser = soper->myuser;
+
+		myuser_notice(operserv->nick, myuser, "\2Alert (%s/%d):\2 %s!%s@%s %S {%s}", owner->name, index, u->nick, u->user, u->host, u->gecos, u->server->name);
+	}
+
+}
+
+static void alert_noticeops_action_display(char *s, size_t size, alert_action_t *a)
+{
+	return_if_fail(s != NULL);
+	return_if_fail(a != NULL);
+
+	snappendf(s, size, " NOTICEOPS");
+}
+
+alert_action_constructor_t alert_noticeops_action = {
+	alert_notice_action_prepare, alert_noticeops_action_exec, alert_notice_action_cleanup,
+	alert_noticeops_action_display
+};
+
 static void exec_events(user_t *u, alert_event_t event_mask);
 
 static void user_added(hook_user_nick_t *n)
@@ -859,6 +902,7 @@ void _modinit(module_t *module)
 
 	alert_acttree = mowgli_patricia_create(strcasecanon);
 	mowgli_patricia_add(alert_acttree, "NOTICE", &alert_notice_action);
+	mowgli_patricia_add(alert_acttree, "NOTICEOPS", &alert_noticeops_action);
 
 	owned_alerts = mowgli_patricia_create(strcasecanon);
 
@@ -956,6 +1000,7 @@ void _moddeinit(module_unload_intent_t intent)
 	mowgli_patricia_destroy(alert_cmdtree, NULL, NULL);
 
 	mowgli_patricia_delete(alert_acttree, "NOTICE");
+	mowgli_patricia_delete(alert_acttree, "NOTICEOPS");
 	mowgli_patricia_destroy(alert_acttree, NULL, NULL);
 
 	command_delete(&os_alert_add, os_alert_cmds);
