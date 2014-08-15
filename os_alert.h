@@ -56,6 +56,11 @@ typedef struct {
 	alert_pattern_t *pattern;
 } alert_pattern_criteria_t;
 
+typedef struct {
+	alert_criteria_t base;
+	bool identified;
+} alert_identified_criteria_t;
+
 /* A constructor for an alert action. */
 typedef struct {
 	alert_action_t *(*prepare)(char **args);
