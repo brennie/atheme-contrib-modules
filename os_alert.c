@@ -498,6 +498,66 @@ alert_criteria_constructor_t alert_identified_criteria = {
 	EVT_CONNECT | EVT_IDENTIFY | EVT_REGISTER | EVT_DROP
 };
 
+static alert_criteria_t *alert_channel_criteria_prepare(char **args)
+{
+	alert_channel_criteria_t *criteria;
+	char *channel;
+
+	return_val_if_fail(args != NULL, NULL);
+	return_val_if_fail(*args != NULL, NULL);
+
+	channel = strtok(*args, " ");
+	*args = strtok(NULL, "");
+
+	criteria = smalloc(sizeof(alert_channel_criteria_t));
+	criteria->channel = sstrdup(channel);
+}
+
+static bool alert_channel_criteria_exec(user_t *u, alert_criteria_t *c)
+{
+	alert_channel_criteria_t *criteria = (alert_channel_criteria_t *)c;
+	mowgli_node_t *node;
+
+	return_val_if_fail(u != NULL, false);
+	return_val_if_fail(c != NULL, false);
+
+	MOWGLI_LIST_FOREACH(node, u->channels.head)
+	{
+		channel_t *channel = node->data;
+
+		if (!strcasecmp(criteria->channel, channel->name))
+			return true;
+	}
+
+	return false;
+}
+
+static void alert_channel_criteria_cleanup(alert_criteria_t *c)
+{
+	alert_channel_criteria_t *criteria = (alert_channel_criteria_t *)c;
+
+	return_if_fail(c != NULL);
+
+	free(criteria->channel);
+	free(criteria);
+}
+
+static void alert_channel_criteria_display(char *s, size_t size, alert_criteria_t *c)
+{
+	alert_channel_criteria_t *criteria = (alert_channel_criteria_t *)c;
+
+	return_if_fail(s != NULL);
+	return_if_fail(c != NULL);
+
+	snappendf(s, size, " CHANNEL %s", criteria->channel);
+}
+
+alert_criteria_constructor_t alert_channel_criteria = {
+	alert_channel_criteria_prepare, alert_channel_criteria_exec, alert_channel_criteria_cleanup,
+	alert_channel_criteria_display,
+	EVT_JOIN
+};
+
 static alert_action_t *alert_notice_action_prepare(char **args)
 {
 	(void)args;

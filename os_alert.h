@@ -61,6 +61,11 @@ typedef struct {
 	bool identified;
 } alert_identified_criteria_t;
 
+typedef struct {
+	alert_criteria_t base;
+	char *channel;
+} alert_channel_criteria_t;
+
 /* A constructor for an alert action. */
 typedef struct {
 	alert_action_t *(*prepare)(char **args);
